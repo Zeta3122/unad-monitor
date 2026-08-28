@@ -49,7 +49,7 @@ KEYWORDS_SECONDARY = [
 # ---------------------------------------------------------------------------
 # Cambia a True si quieres recibir un mensaje diario aunque no haya novedades.
 # Por defecto esta en False para no llenar tu Telegram de mensajes.
-SEND_DAILY_STATUS = False
+SEND_DAILY_STATUS = True
 
 # Hora (hora de Colombia, 0-23) a partir de la cual se envia el mensaje
 # de estado, si SEND_DAILY_STATUS = True. Solo se envia una vez por dia.
