@@ -1,4 +1,6 @@
 {
   "seen": [],
-  "last_status_date": null
+  "last_status_date": null,
+  "consecutive_fetch_failures": 0,
+  "consecutive_zero_items": 0
 }
