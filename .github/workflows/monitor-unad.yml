@@ -15,7 +15,7 @@ on:
     # FASE CRÍTICA (1 de noviembre → 20 de diciembre): cada 2 horas.
     # Para activarla el 1 de noviembre: quita el "#" del inicio de la
     # siguiente línea y agrega un "#" al inicio de la línea de arriba.
-     - cron: "0 */2 * * *"
+    - cron: "0 */2 * * *"
 
   workflow_dispatch: {}   # permite ejecutar manualmente el bot desde GitHub
 
