@@ -12,6 +12,7 @@ computador si lo deseas (ver instrucciones de prueba manual).
 """
 
 import hashlib
+import html
 import json
 import os
 from datetime import datetime
@@ -65,12 +66,27 @@ def make_id(url, title):
 # ---------------------------------------------------------------------------
 # Descarga y extraccion de contenido
 # ---------------------------------------------------------------------------
+def _decode_response(resp):
+    """
+    requests asume ISO-8859-1 cuando el servidor no especifica un charset
+    en el header Content-Type (comportamiento heredado del estandar HTTP,
+    aunque casi todas las paginas actuales son UTF-8). Si eso pasa, las
+    tildes y la ñ pueden llegar corrompidas y las palabras clave dejarian
+    de coincidir sin que se note ningun error. Si detectamos ese caso,
+    usamos la codificacion que 'chardet'/'charset_normalizer' detecta
+    a partir del contenido real (resp.apparent_encoding) en su lugar.
+    """
+    if resp.encoding is None or resp.encoding.lower() == "iso-8859-1":
+        resp.encoding = resp.apparent_encoding
+    return resp.text
+
+
 def fetch_page(url):
     headers = {"User-Agent": config.USER_AGENT}
     try:
         resp = requests.get(url, headers=headers, timeout=config.REQUEST_TIMEOUT_SECONDS)
         resp.raise_for_status()
-        return resp.text
+        return _decode_response(resp)
     except requests.exceptions.SSLError as e:
         # Cadena de certificados incompleta del lado del servidor (conocido
         # en noticias.unad.edu.co). Reintentamos una sola vez sin verificar
@@ -82,7 +98,7 @@ def fetch_page(url):
                 url, headers=headers, timeout=config.REQUEST_TIMEOUT_SECONDS, verify=False
             )
             resp.raise_for_status()
-            return resp.text
+            return _decode_response(resp)
         except requests.exceptions.RequestException as e2:
             print(f"[ERROR] No se pudo descargar {url} ni siquiera sin verificar certificado: {e2}")
             return None
@@ -183,15 +199,17 @@ def send_telegram_message(text):
 def build_alert_message(item, hits):
     now_bogota = datetime.now(BOGOTA_TZ).strftime("%Y-%m-%d %H:%M:%S")
     hits_text = ", ".join(sorted(set(hits)))
-    snippet = item["context"][:280].strip()
+    safe_title = html.escape(item["title"])
+    safe_snippet = html.escape(item["context"][:280].strip())
+    safe_url = html.escape(item["url"])
 
     return (
         "⚠️ <b>Posible convocatoria de Gratuidad UNAD</b>\n\n"
-        f"<b>Título:</b> {item['title']}\n"
+        f"<b>Título:</b> {safe_title}\n"
         f"<b>Detectado:</b> {now_bogota} (hora Colombia)\n"
-        f"<b>URL:</b> {item['url']}\n"
+        f"<b>URL:</b> {safe_url}\n"
         f"<b>Palabras que activaron la alerta:</b> {hits_text}\n"
-        f"<b>Fragmento:</b> {snippet}\n\n"
+        f"<b>Fragmento:</b> {safe_snippet}\n\n"
         "Verifica inmediatamente la información en el sitio oficial de la UNAD."
     )
 
@@ -260,7 +278,12 @@ def main():
             message = build_alert_message(item, hits)
             if send_telegram_message(message):
                 new_alerts_sent += 1
-            seen_ids.add(item_id)
+                seen_ids.add(item_id)
+            else:
+                # No se marca como visto: si el envío falló (Telegram caído,
+                # red intermitente, etc.), queremos volver a intentarlo en
+                # la siguiente ejecución en vez de perder la alerta.
+                print(f"  [ERROR] No se pudo enviar la alerta de {item['url']}; se reintentará en la próxima revisión.")
 
     # -----------------------------------------------------------------
     # Chequeo de salud: detectar si el bot esta "ciego" (no descarga
@@ -320,4 +343,23 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        # Cualquier error no previsto (un bug, un cambio inesperado en la
+        # pagina que rompe el parsing, etc.) se avisa por Telegram de una
+        # vez, en lugar de quedar visible solo en los logs de GitHub Actions
+        # que quizas no revises seguido. Luego se vuelve a lanzar el error
+        # para que la ejecucion siga apareciendo en rojo en GitHub (asi
+        # queda registro tecnico completo si necesitas revisarlo).
+        import traceback
+
+        print("[ERROR CRÍTICO]")
+        print(traceback.format_exc())
+        send_telegram_message(
+            "🔴 <b>El monitor UNAD se cayó con un error inesperado</b>\n\n"
+            f"Tipo de error: {type(e).__name__}: {e}\n\n"
+            "El bot no pudo completar esta revisión. Revisa la pestaña "
+            "Actions en GitHub para ver el detalle técnico completo."
+        )
+        raise
