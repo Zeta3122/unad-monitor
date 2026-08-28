@@ -18,9 +18,17 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import requests
+import urllib3
 from bs4 import BeautifulSoup
 
 import config
+
+# El servidor de noticias.unad.edu.co no envía el certificado intermedio
+# completo (cadena de confianza incompleta de su lado, no un problema de
+# este script). Cuando eso pasa, reintentamos una vez sin verificar el
+# certificado. Al hacerlo, silenciamos la advertencia esperada de urllib3
+# para no llenar el log de ruido.
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BOGOTA_TZ = ZoneInfo("America/Bogota")
 
@@ -61,6 +69,21 @@ def fetch_page(url):
         resp = requests.get(url, headers=headers, timeout=config.REQUEST_TIMEOUT_SECONDS)
         resp.raise_for_status()
         return resp.text
+    except requests.exceptions.SSLError as e:
+        # Cadena de certificados incompleta del lado del servidor (conocido
+        # en noticias.unad.edu.co). Reintentamos una sola vez sin verificar
+        # el certificado; si el sitio corrige su configuración, este bloque
+        # deja de activarse solo y la verificación normal vuelve a aplicar.
+        print(f"[ADVERTENCIA] Fallo de verificación SSL en {url}, reintentando sin verificar certificado: {e}")
+        try:
+            resp = requests.get(
+                url, headers=headers, timeout=config.REQUEST_TIMEOUT_SECONDS, verify=False
+            )
+            resp.raise_for_status()
+            return resp.text
+        except requests.exceptions.RequestException as e2:
+            print(f"[ERROR] No se pudo descargar {url} ni siquiera sin verificar certificado: {e2}")
+            return None
     except requests.exceptions.RequestException as e:
         print(f"[ERROR] No se pudo descargar {url}: {e}")
         return None
