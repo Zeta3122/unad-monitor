@@ -1,0 +1,59 @@
+name: Monitor Gratuidad UNAD
+
+on:
+  schedule:
+    # ─────────────────────────────────────────────────────────────────
+    # FASE ACTUAL (ahora → 31 de octubre): revisión diaria.
+    # 13:00 UTC = 08:00 hora de Colombia (Colombia no cambia de horario,
+    # así que el offset siempre es UTC-5).
+    #
+    # A partir del 1 de noviembre: comenta esta línea (agrega "#" al
+    # inicio) y descomenta la línea de "FASE CRÍTICA" de abajo.
+    - cron: "0 13 * * *"
+
+    # ─────────────────────────────────────────────────────────────────
+    # FASE CRÍTICA (1 de noviembre → 20 de diciembre): cada 2 horas.
+    # Para activarla el 1 de noviembre: quita el "#" del inicio de la
+    # siguiente línea y agrega un "#" al inicio de la línea de arriba.
+    # - cron: "0 */2 * * *"
+
+  workflow_dispatch: {}   # permite ejecutar manualmente el bot desde GitHub
+
+permissions:
+  contents: write   # necesario para poder guardar state.json en el repositorio
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias
+        run: pip install -r requirements.txt
+
+      - name: Ejecutar monitor
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python monitor.py
+
+      - name: Guardar estado actualizado (si cambió)
+        if: always()
+        run: |
+          git config user.name "monitor-unad-bot"
+          git config user.email "actions@github.com"
+          if ! git diff --quiet -- state.json; then
+            git add state.json
+            git commit -m "Actualiza estado del monitor [skip ci]"
+            git push
+          else
+            echo "state.json sin cambios, no se hace commit."
+          fi
