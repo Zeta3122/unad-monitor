@@ -38,16 +38,18 @@ BOGOTA_TZ = ZoneInfo("America/Bogota")
 # ---------------------------------------------------------------------------
 def load_state():
     if not os.path.exists(config.STATE_FILE):
-        return {"seen": [], "last_status_date": None}
+        return {"seen": [], "last_status_date": None, "consecutive_fetch_failures": 0, "consecutive_zero_items": 0}
     try:
         with open(config.STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
             data.setdefault("seen", [])
             data.setdefault("last_status_date", None)
+            data.setdefault("consecutive_fetch_failures", 0)
+            data.setdefault("consecutive_zero_items", 0)
             return data
     except (json.JSONDecodeError, OSError) as e:
         print(f"[ADVERTENCIA] No se pudo leer {config.STATE_FILE}, se crea uno nuevo: {e}")
-        return {"seen": [], "last_status_date": None}
+        return {"seen": [], "last_status_date": None, "consecutive_fetch_failures": 0, "consecutive_zero_items": 0}
 
 
 def save_state(state):
@@ -194,11 +196,30 @@ def build_alert_message(item, hits):
     )
 
 
-def build_status_message():
+def build_status_message(pages_ok, pages_total, items_found):
     now_bogota = datetime.now(BOGOTA_TZ).strftime("%Y-%m-%d %H:%M:%S")
     return (
         "✅ Monitor UNAD funcionando; no se detectaron convocatorias nuevas.\n"
-        f"Última revisión: {now_bogota} (hora Colombia)."
+        f"Última revisión: {now_bogota} (hora Colombia).\n"
+        f"Páginas revisadas con éxito: {pages_ok}/{pages_total} — enlaces encontrados: {items_found}."
+    )
+
+
+def build_health_warning_message(kind, count):
+    now_bogota = datetime.now(BOGOTA_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    if kind == "descarga":
+        detalle = f"no ha podido descargar ninguna de las páginas vigiladas en las últimas {count} revisiones seguidas"
+    else:
+        detalle = (
+            f"descargó la página pero encontró muy pocos enlaces (o ninguno) en las últimas {count} "
+            "revisiones seguidas — es posible que la UNAD haya cambiado el diseño de la página"
+        )
+    return (
+        "🔴 <b>Posible falla del monitor UNAD</b>\n\n"
+        f"El bot {detalle}.\n"
+        f"Hora: {now_bogota} (hora Colombia)\n\n"
+        "Esto no significa que haya o no haya convocatoria: significa que el bot "
+        "puede no estar revisando bien. Revisa la pestaña Actions en GitHub."
     )
 
 
@@ -209,6 +230,8 @@ def main():
     state = load_state()
     seen_ids = set(state["seen"])
     new_alerts_sent = 0
+    successful_fetches = 0
+    total_items_found = 0
 
     for url in config.URLS:
         print(f"Revisando: {url}")
@@ -216,7 +239,9 @@ def main():
         if html is None:
             continue
 
+        successful_fetches += 1
         items = extract_items(html, url)
+        total_items_found += len(items)
         print(f"  -> {len(items)} enlaces candidatos encontrados")
 
         for item in items:
@@ -237,20 +262,61 @@ def main():
                 new_alerts_sent += 1
             seen_ids.add(item_id)
 
-    # Mensaje diario de estado (opcional, desactivado por defecto)
+    # -----------------------------------------------------------------
+    # Chequeo de salud: detectar si el bot esta "ciego" (no descarga
+    # nada, o descarga pero no encuentra enlaces) aunque no haya un
+    # error de Python que haga fallar la ejecucion. Esto es independiente
+    # del mensaje diario de estado: si algo esta mal, avisa aunque
+    # SEND_DAILY_STATUS este desactivado y sin esperar a la hora fijada.
+    # -----------------------------------------------------------------
+    consecutive_fetch_failures = state.get("consecutive_fetch_failures", 0)
+    consecutive_zero_items = state.get("consecutive_zero_items", 0)
+
+    if successful_fetches == 0:
+        consecutive_fetch_failures += 1
+        consecutive_zero_items = 0  # no aplica si ni siquiera hubo descarga
+    elif total_items_found < config.MIN_EXPECTED_ITEMS:
+        consecutive_fetch_failures = 0
+        consecutive_zero_items += 1
+    else:
+        consecutive_fetch_failures = 0
+        consecutive_zero_items = 0
+
+    def _should_warn(count):
+        # Avisa la primera vez que se cruza el umbral, y luego cada
+        # tantas veces el umbral para no llenar Telegram de alertas.
+        return count >= config.FAILURE_ALERT_THRESHOLD and (
+            count % config.FAILURE_ALERT_THRESHOLD == 0
+        )
+
+    if _should_warn(consecutive_fetch_failures):
+        send_telegram_message(build_health_warning_message("descarga", consecutive_fetch_failures))
+
+    if _should_warn(consecutive_zero_items):
+        send_telegram_message(build_health_warning_message("lectura", consecutive_zero_items))
+
+    state["consecutive_fetch_failures"] = consecutive_fetch_failures
+    state["consecutive_zero_items"] = consecutive_zero_items
+
+    # Mensaje diario de estado (opcional)
     if config.SEND_DAILY_STATUS and new_alerts_sent == 0:
         today_str = datetime.now(BOGOTA_TZ).strftime("%Y-%m-%d")
         current_hour = datetime.now(BOGOTA_TZ).hour
         already_sent_today = state.get("last_status_date") == today_str
 
         if current_hour >= config.STATUS_HOUR_BOGOTA and not already_sent_today:
-            if send_telegram_message(build_status_message()):
+            status_msg = build_status_message(successful_fetches, len(config.URLS), total_items_found)
+            if send_telegram_message(status_msg):
                 state["last_status_date"] = today_str
 
     state["seen"] = list(seen_ids)
     save_state(state)
 
-    print(f"Listo. Alertas nuevas enviadas: {new_alerts_sent}")
+    print(
+        f"Listo. Alertas nuevas enviadas: {new_alerts_sent}. "
+        f"Páginas ok: {successful_fetches}/{len(config.URLS)}. "
+        f"Enlaces totales: {total_items_found}."
+    )
 
 
 if __name__ == "__main__":
