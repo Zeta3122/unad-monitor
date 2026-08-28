@@ -48,12 +48,26 @@ KEYWORDS_SECONDARY = [
 # 3. MENSAJE DIARIO DE ESTADO
 # ---------------------------------------------------------------------------
 # Cambia a True si quieres recibir un mensaje diario aunque no haya novedades.
-# Por defecto esta en False para no llenar tu Telegram de mensajes.
 SEND_DAILY_STATUS = True
 
 # Hora (hora de Colombia, 0-23) a partir de la cual se envia el mensaje
 # de estado, si SEND_DAILY_STATUS = True. Solo se envia una vez por dia.
 STATUS_HOUR_BOGOTA = 8
+
+# ---------------------------------------------------------------------------
+# 3b. DETECCIÓN DE FALLAS SILENCIOSAS ("el bot está ciego")
+# ---------------------------------------------------------------------------
+# Si una página se descarga bien pero se extraen menos enlaces que este
+# número, se considera sospechoso (posible cambio de diseño del sitio).
+# Ajusta este valor tras ver en los logs cuántos enlaces suele encontrar
+# normalmente (revisa "Enlaces totales" en el resumen de cada ejecución).
+MIN_EXPECTED_ITEMS = 5
+
+# Cuántas revisiones seguidas con fallas (de descarga o de lectura) deben
+# pasar antes de mandar una alerta roja de "el bot puede estar ciego".
+# Con revisiones cada 2 horas, un valor de 2 significa que te avisa a
+# más tardar 4 horas después de que algo empezó a fallar.
+FAILURE_ALERT_THRESHOLD = 2
 
 # ---------------------------------------------------------------------------
 # 4. ARCHIVO DE ESTADO / DEDUPLICACION
