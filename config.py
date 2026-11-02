@@ -21,6 +21,7 @@ URLS = [
 KEYWORDS_TRIGGER_ALONE = [
     "política de gratuidad",
     "politica de gratuidad",  # variante sin tilde, por si el HTML la pierde
+    "periodista emp",  # PRUEBA - borrar después
 ]
 
 # Palabra "ancla": si aparece junto con alguna de KEYWORDS_SECONDARY,
